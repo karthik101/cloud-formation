@@ -105,7 +105,6 @@
 			"sources" : {
 			  "/usr/share/puppet/modules/archive" : "https://github.com/myrontuttle/puppet-archive/zipball/master",
               "/usr/share/puppet/modules/cfn" : "https://github.com/myrontuttle/puppet-cfn-plugin/zipball/master",
-		"/usr/share/puppet/modules/apt" : "https://github.com/puppetlabs/puppet-apt/zipball/master",
 			  "/usr/share/puppet/modules/stdlib" : "https://github.com/puppetlabs/puppetlabs-stdlib/zipball/master",
               "/usr/share/puppet/modules/duplicity" : "https://github.com/myrontuttle/puppet-duplicity-cfn/zipball/master",
               "/usr/share/puppet/modules/git" : "https://github.com/myrontuttle/puppet-gitolite/zipball/master",
