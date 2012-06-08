@@ -1,0 +1,201 @@
+{
+  "AWSTemplateFormatVersion" : "2010-09-09",
+
+  "Description" : "Create an EBS-backed EC2 instance based on the region and architecture and an IAM user with access to an S3 bucket via an IAM policy.",
+
+  "Parameters" : {
+	"Arch" : {
+      "Description" : "EC2 architecture, 32 or 64",
+      "Type" : "Number",
+      "Default" : "64",
+	  "AllowedValues" : [ "32", "64" ]
+    },
+	"InstanceType" : {
+      "Description" : "EC2 instance type",
+      "Type" : "String", 
+      "Default" : "t1.micro",
+	  "AllowedValues" : [ "t1.micro", "m1.small", "m1.large", "m1.xlarge", "m2.xlarge", "m2.2xlarge", "m2.4xlarge", "c1.medium", "c1.xlarge", "cc1.4xlarge" ],
+      "ConstraintDescription" : "Must be a valid EC2 instance type."
+    },
+    "KeyName" : {
+      "Description" : "Name of an existing EC2 KeyPair to enable SSH access to the instance",
+      "Type" : "String",
+	  "Default" : "DevServerKeys"
+    },
+	"SecurityGroup" : {
+	  "Description" : "Name of an existing EC2 Security Group",
+	  "Type" : "String",
+	  "Default" : "dev-sg"
+	},
+    "PuppetRole" : {
+      "Description" : "Manifest of roles",
+      "Type" : "String",
+      "Default" : "devserver"
+    },
+    "ContentLocation" : {
+      "Description" : "Location of PUBLIC package (Zip, GZIP or Git repository URL) that includes the Puppet Module(s)",
+      "Type" : "String",
+      "Default" : "https://s3.amazonaws.com/com.myrontuttle.dev.provision/devserver.tar.gz"
+    },
+	"BackupAction" : {
+	  "Description" : "Action to take with backups",
+	  "Type" : "String",
+	  "Default" : "backup",
+	  "AllowedValues" : [ "backup", "restore", "none" ]
+	},	  
+	"BackupAccessId" : {
+	  "Description" : "BackupAgent AWS Access Key Id",
+	  "Type" : "String"
+	},
+	"BackupSecretKey" : {
+	  "Description" : "BackupAgent AWS Secret Access Key",
+	  "Type" : "String",
+	  "NoEcho" : "TRUE"
+	},
+	"BackupLocation" : {
+	  "Description" : "S3 Address for backup files",
+	  "Type" : "String",
+	  "Default" : "com.myrontuttle.backup/devserver/"
+	}
+  },
+
+  "Mappings" : {
+    "AWSRegionArch2AMI" : {
+      "us-east-1"      : { "32" : "ami-31814f58", "64" : "ami-1b814f72" },
+      "us-west-1"      : { "32" : "ami-38fe7308", "64" : "ami-30fe7300" },
+      "us-west-2"      : { "32" : "ami-11d68a54", "64" : "ami-1bd68a5e" },
+      "eu-west-1"      : { "32" : "ami-973b06e3", "64" : "ami-953b06e1" },
+      "sa-east-1"      : { "32" : "ami-3e3be423", "64" : "ami-3c3be421" },
+      "ap-southeast-1" : { "32" : "ami-b4b0cae6", "64" : "ami-beb0caec" },
+      "ap-northeast-1" : { "32" : "ami-0644f007", "64" : "ami-0a44f00b" }
+    }
+  },
+
+  "Resources" : {
+    "StackUser" : {
+      "Type" : "AWS::IAM::User",
+	  "Properties" : {
+		"Path" : "/",
+		"Policies" : [{
+		  "PolicyName": "root",
+		  "PolicyDocument" : {
+			"Statement" : [{
+			  "Effect" : "Allow",
+			  "Action" : "cloudformation:DescribeStackResource",
+			  "Resource":"*"
+			}]
+		  }
+		}]
+	  }
+    },
+	
+	"StackUserAccessKey" : {
+     "Type" : "AWS::IAM::AccessKey",
+     "Properties" : {
+          "UserName" : {"Ref": "StackUser"}
+      }
+	},
+
+    "DevServer" : {
+      "Type" : "AWS::EC2::Instance",
+	  "Metadata" : {
+		"AWS::CloudFormation::Init" : {
+		  "config" : {
+			"sources" : {
+              "/usr/share/puppet/modules" : { "Ref" : "ContentLocation" }
+			},
+			"packages" : {
+			  "yum" : {
+				"puppet"		: [],
+                "ruby-devel"    : [],
+                "gcc"           : [],
+                "make"          : [],
+                "rubygems"      : []
+			  },
+              "rubygems" : {
+                "json"          : []
+			  }
+			},
+			"files" : {
+              "/etc/yum.repos.d/epel.repo" : {
+                "source" : "https://s3.amazonaws.com/cloudformation-examples/enable-epel-on-amazon-linux-ami",
+                "mode"   : "000644",
+                "owner"  : "root",
+                "group"  : "root"
+              },
+              "/etc/puppet/puppet.conf" : {
+                "content" : { "Fn::Join" : ["", [
+                  "[main]\n",
+                  "   logdir=/var/log/puppet\n",
+                  "   rundir=/var/run/puppet\n",
+                  "   ssldir=$vardir/ssl\n",
+                  "   pluginsync=true\n",
+                  "[agent]\n",
+                  "   classfile=$vardir/classes.txt\n",
+                  "   localconfig=$vardir/localconfig\n"
+                ]] },
+                "mode" : "000644",
+                "owner" : "root",
+                "group" : "root"
+              }
+            }
+		  }
+		},
+		"Puppet" : {
+		  "roles"		: {"Ref" : "PuppetRole"},
+		  "backup_action"	: {"Ref" : "BackupAction"},
+		  "access_id"	: {"Ref" : "BackupAccessId"},
+		  "secret_key"	: {"Ref" : "BackupSecretKey"},
+		  "file_dest"	: {"Ref" : "BackupLocation"}
+		}
+	  },
+      "Properties" : {
+		"ImageId" : { 
+		  "Fn::FindInMap" : [ "AWSRegionArch2AMI", { "Ref" : "AWS::Region" }, { "Ref" : "Arch" } ] },
+        "SecurityGroups" : [ { "Ref" : "SecurityGroup" } ],
+		"InstanceType" : { "Ref" : "InstanceType" },
+        "KeyName" : { "Ref" : "KeyName" },
+		"UserData" : { 
+          "Fn::Base64" : { 
+			"Fn::Join" : [ "", [
+			  "#!/bin/bash\n",
+              "yum update -y aws-cfn-bootstrap\n",
+			  "yum update -y\n",
+			  "/opt/aws/bin/cfn-init -s ", { "Ref" : "AWS::StackName" }, " -r DevServer ", "--region ", { "Ref" : "AWS::Region" }, " --access-key ", { "Ref" : "StackUserAccessKey" }, " --secret-key ", {"Fn::GetAtt" : ["StackUserAccessKey", "SecretAccessKey"]}, "\n",
+			  "puppet apply -e 'include ", { "Ref" : "PuppetRole" }, "'\n",
+			  "/opt/aws/bin/cfn-signal -e $? '", { "Ref" : "ApplicationWaitHandle" }, "'\n"
+			]]
+          }
+        }
+      }
+    },
+
+    "ApplicationWaitHandle" : {
+      "Type" : "AWS::CloudFormation::WaitConditionHandle"
+    },
+
+    "ApplicationWaitCondition" : {
+      "Type" : "AWS::CloudFormation::WaitCondition",
+      "DependsOn"  : "DevServer",
+      "Properties" : {
+        "Handle"   : { "Ref" : "ApplicationWaitHandle" },
+        "Timeout"  : "2400"
+      }
+    }
+  },
+
+  "Outputs" : {
+    "InstanceId" : {
+      "Description" : "InstanceId of the newly created EC2 instance",
+      "Value" : { "Ref" : "DevServer" }
+    },
+    "PublicDNS" : {
+      "Value" : { "Fn::GetAtt" : [ "DevServer", "PublicDnsName" ] }, 
+      "Description" : "DNS Name of the newly created EC2 instance"
+    },
+    "PublicIP" : {
+      "Description" : "Public IP address of the newly created EC2 instance",
+      "Value" : { "Fn::GetAtt" : [ "DevServer", "PublicIp" ] }
+    }
+  }
+}
